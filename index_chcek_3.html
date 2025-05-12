@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Space Invaders</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background-color: black;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      overflow: hidden;
+    }
+    canvas {
+      background-image: url('space_invaders_background.gif');
+      background-size: cover;
+      display: block;
+    }
+    #overlay {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      color: white;
+      font-family: Arial, sans-serif;
+      font-size: 20px;
+    }
+    #gameOver {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      font-family: Arial, sans-serif;
+      font-size: 30px;
+      display: none;
+      text-align: center;
+    }
+    #restartBtn {
+      margin-top: 20px;
+      padding: 10px 20px;
+      background: white;
+      color: black;
+      border: none;
+      font-size: 16px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas" width="600" height="600"></canvas>
+  <div id="overlay">Score: 0</div>
+  <div id="gameOver">
+    <div id="finalScore"></div>
+    <button id="restartBtn">Click to Restart</button>
+  </div>
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const overlay = document.getElementById('overlay');
+    const gameOverScreen = document.getElementById('gameOver');
+    const finalScoreText = document.getElementById('finalScore');
+    const restartBtn = document.getElementById('restartBtn');
+
+    let player = { x: 275, y: 550, width: 40, height: 40, speed: 15, dx: 0 };
+    let bullet = { x: 0, y: 0, width: 4, height: 10, speed: 20, state: 'ready' };
+    let enemies = [];
+    let ramos = { x: Math.random() * 500 + 50, y: 100, width: 40, height: 40, speed: 4, active: false, direction: 1 };
+    let score = 0;
+    let enemySpeed = 2;
+    let gameRunning = true;
+
+    const images = {};
+    const sounds = {};
+    const keys = {};
+
+    const loadImage = (src) => {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.src = src;
+        img.onload = () => resolve(img);
+      });
+    };
+
+    const loadSound = (src) => {
+      const audio = new Audio(src);
+      return audio;
+    };
+
+    async function loadAssets() {
+      const imgFiles = ["invaders_1.gif", "invaders_2.gif", "invaders_3.gif", "invaders_4.gif", "invaders_5.gif", "invaders.gif", "player.gif"];
+      for (let file of imgFiles) {
+        images[file] = await loadImage(file);
+      }
+      sounds.kick = loadSound("kick.wav");
+      sounds.goat = loadSound("goat.wav");
+      sounds.hila = loadSound("hila.wav");
+      sounds.mass = loadSound("mass.wav");
+      sounds.bg1 = loadSound("background_music.mp3");
+      sounds.bg2 = loadSound("background_music_2.mp3");
+      sounds.bg1.loop = true;
+      sounds.bg2.loop = true;
+    }
+
+    function drawPlayer() {
+      ctx.drawImage(images['player.gif'], player.x, player.y, player.width, player.height);
+    }
+
+    function drawBullet() {
+      if (bullet.state === 'fire') {
+        ctx.fillStyle = 'yellow';
+        ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
+      }
+    }
+
+    function drawEnemies() {
+      enemies.forEach((enemy, i) => {
+        ctx.drawImage(images[`invaders_${(i % 5) + 1}.gif`], enemy.x, enemy.y, enemy.width, enemy.height);
+      });
+    }
+
+    function drawRamos() {
+      if (ramos.active) {
+        ctx.drawImage(images['invaders.gif'], ramos.x, ramos.y, ramos.width, ramos.height);
+      }
+    }
+
+    function update() {
+      if (!gameRunning) return;
+
+      // Player movement
+      if (keys['a'] || keys['A']) player.x -= player.speed;
+      if (keys['d'] || keys['D']) player.x += player.speed;
+      player.x = Math.max(0, Math.min(canvas.width - player.width, player.x));
+
+      // Bullet
+      if (bullet.state === 'fire') {
+        bullet.y -= bullet.speed;
+        if (bullet.y < 0) bullet.state = 'ready';
+      }
+
+      // Enemies
+      if (!ramos.active) {
+        enemies.forEach((enemy) => {
+          enemy.x += enemySpeed;
+        });
+        if (enemies.some(e => e.x > canvas.width - 40 || e.x < 0)) {
+          enemySpeed *= -1;
+          enemies.forEach((e) => e.y += 40);
+        }
+
+        // Check enemy bullet collision
+        enemies.forEach((enemy) => {
+          if (isColliding(bullet, enemy)) {
+            bullet.state = 'ready';
+            bullet.y = 0;
+            score += 10;
+            overlay.innerText = `Score: ${score}`;
+            enemy.x = Math.random() * 500 + 50;
+            enemy.y = Math.random() * 150 + 50;
+            sounds.goat.play();
+          }
+          if (isColliding(player, enemy)) {
+            endGame();
+          }
+        });
+
+        if (enemies.every(e => e.y > canvas.height)) spawnEnemies();
+
+        if (score >= 100) {
+          ramos.active = true;
+          enemies = [];
+        }
+      } else {
+        ramos.x += ramos.speed * ramos.direction;
+        if (ramos.x <= 0 || ramos.x >= canvas.width - ramos.width) {
+          ramos.direction *= -1;
+          ramos.y += 40;
+          ramos.speed += 0.5;
+        }
+
+        if (isColliding(bullet, ramos)) {
+          bullet.state = 'ready';
+          bullet.y = 0;
+          score += 25;
+          overlay.innerText = `Score: ${score}`;
+          sounds.goat.play();
+          ramos.x = Math.random() * 500 + 50;
+          ramos.y = Math.random() * 150 + 50;
+        }
+        if (isColliding(player, ramos)) {
+          endGame();
+        }
+      }
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawPlayer();
+      drawBullet();
+      drawEnemies();
+      drawRamos();
+    }
+
+    function loop() {
+      update();
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    function isColliding(a, b) {
+      return a.x < b.x + b.width &&
+             a.x + a.width > b.x &&
+             a.y < b.y + b.height &&
+             a.y + a.height > b.y;
+    }
+
+    function fireBullet() {
+      if (bullet.state === 'ready') {
+        bullet.state = 'fire';
+        bullet.x = player.x + player.width / 2 - bullet.width / 2;
+        bullet.y = player.y;
+        sounds.kick.play();
+      }
+    }
+
+    function spawnEnemies() {
+      enemies = [];
+      for (let i = 0; i < 5; i++) {
+        enemies.push({
+          x: Math.random() * 500 + 50,
+          y: Math.random() * 150 + 50,
+          width: 40,
+          height: 40
+        });
+      }
+    }
+
+    function endGame() {
+      gameRunning = false;
+      sounds.bg1.pause();
+      sounds.bg2.pause();
+      sounds.hila.play();
+      setTimeout(() => {
+        sounds.mass.play();
+        finalScoreText.innerText = `Game Over\nFinal Score: ${score}`;
+        gameOverScreen.style.display = 'block';
+      }, 1000);
+    }
+
+    function restartGame() {
+      score = 0;
+      enemySpeed = 2;
+      bullet.state = 'ready';
+      ramos = { x: Math.random() * 500 + 50, y: 100, width: 40, height: 40, speed: 4, active: false, direction: 1 };
+      player.x = 275;
+      enemies = [];
+      spawnEnemies();
+      overlay.innerText = `Score: ${score}`;
+      gameOverScreen.style.display = 'none';
+      gameRunning = true;
+      sounds.bg1.play();
+      sounds.bg2.play();
+    }
+
+    restartBtn.addEventListener('click', restartGame);
+
+    document.addEventListener('keydown', (e) => {
+      keys[e.key] = true;
+      if (e.code === 'Space') fireBullet();
+    });
+
+    document.addEventListener('keyup', (e) => {
+      keys[e.key] = false;
+    });
+
+    loadAssets().then(() => {
+      spawnEnemies();
+      sounds.bg1.play();
+      sounds.bg2.play();
+      loop();
+    });
+  </script>
+</body>
+</html>
